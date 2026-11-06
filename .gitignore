@@ -1,0 +1,28 @@
+## .NET / build artifacts
+bin/
+obj/
+*.user
+*.suo
+.vs/
+artifacts/
+.nuget/
+
+## Test results
+TestResults/
+*.trx
+coverage*.json
+coverage*.xml
+
+## Rider / VS Code
+.idea/
+.vscode/
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Local logs
+*.log
+
+## Docker local overrides
+.env

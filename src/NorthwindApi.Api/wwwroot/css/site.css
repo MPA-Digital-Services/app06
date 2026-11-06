@@ -1,0 +1,101 @@
+:root {
+  --bg: #f4f6f9;
+  --panel: #ffffff;
+  --ink: #1f2d3d;
+  --muted: #6b7c93;
+  --accent: #1f4e78;
+  --accent-soft: #e2ebf7;
+  --border: #dce3ec;
+  --shadow: 0 1px 3px rgba(16, 34, 56, .08), 0 8px 24px rgba(16, 34, 56, .06);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+header.app-bar {
+  background: linear-gradient(135deg, #1f4e78, #2c6aa0);
+  color: #fff;
+  padding: 18px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: var(--shadow);
+}
+
+header.app-bar h1 { margin: 0; font-size: 20px; font-weight: 600; }
+header.app-bar .sub { color: #cfe0f2; font-size: 12px; margin-top: 2px; }
+header.app-bar a { color: #cfe0f2; text-decoration: none; margin-left: 16px; font-size: 13px; }
+header.app-bar a:hover { color: #fff; text-decoration: underline; }
+
+main { max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; }
+
+.filters {
+  display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+  background: var(--panel); padding: 16px 18px; border-radius: 10px;
+  box-shadow: var(--shadow); margin-bottom: 20px;
+}
+.filters label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.filters input, .filters select {
+  padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+}
+button, .btn {
+  background: var(--accent); color: #fff; border: none; border-radius: 6px;
+  padding: 8px 14px; font-size: 13px; cursor: pointer; text-decoration: none;
+  display: inline-block;
+}
+button:hover, .btn:hover { background: #163a5a; }
+.btn.ghost { background: var(--accent-soft); color: var(--accent); }
+.btn.ghost:hover { background: #cdddf2; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 22px; }
+.card {
+  background: var(--panel); border-radius: 10px; padding: 16px 18px; box-shadow: var(--shadow);
+  border-left: 4px solid var(--accent);
+}
+.card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.card .value { font-size: 24px; font-weight: 600; margin-top: 6px; }
+
+section.panel {
+  background: var(--panel); border-radius: 10px; padding: 18px 20px; box-shadow: var(--shadow);
+  margin-bottom: 22px;
+}
+section.panel h2 { margin: 0 0 14px; font-size: 16px; font-weight: 600; }
+section.panel .panel-actions { float: right; font-weight: 400; }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th { background: var(--accent-soft); color: var(--accent); font-weight: 600; position: sticky; top: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr:hover { background: #f7fafd; }
+
+.bar-chart { display: flex; align-items: flex-end; gap: 6px; height: 180px; padding-top: 10px; }
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.bar {
+  width: 100%; background: linear-gradient(180deg, #2c6aa0, #1f4e78); border-radius: 4px 4px 0 0;
+  min-height: 2px; transition: height .3s ease;
+}
+.bar-col .cap { font-size: 10px; color: var(--muted); margin-top: 6px; white-space: nowrap; }
+
+.table-scroll { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+
+.status { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.status.Enviado { background: #e2f3e6; color: #1e7a3c; }
+.status.Pendiente { background: #fdf3d9; color: #9a6b00; }
+.status.Vencido { background: #fbe3e3; color: #a52020; }
+
+.muted { color: var(--muted); }
+.empty { padding: 24px; text-align: center; color: var(--muted); }
+.spinner { padding: 24px; text-align: center; color: var(--muted); }
+.error { padding: 14px; background: #fbe3e3; color: #a52020; border-radius: 8px; }
+
+footer.app-footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; }

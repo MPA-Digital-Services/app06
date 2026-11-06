@@ -1,0 +1,31 @@
+# Salidas de compilación
+**/bin/
+**/obj/
+
+# Control de versiones y metadatos
+.git/
+.gitignore
+.gitattributes
+
+# Pruebas (no se incluyen en la imagen de la API)
+tests/
+
+# Documentación y artefactos de desarrollo
+README.md
+docs/
+.gitlab-ci.yml
+*.log
+run-api.cmd
+run.log
+run.err.log
+.env
+
+# El script de datos no se copia a la imagen final de la API. Se incluye en el
+# contexto porque la imagen de SQL Server (deploy/sqlserver/Dockerfile) lo copia
+# a /scripts/instnwnd.sql para inicializar Northwind.
+!instnwnd.sql
+
+# Configuración de Docker (se pasa desde el host)
+Dockerfile
+docker-compose.yml
+.dockerignore

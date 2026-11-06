@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Northwind · Panel</title>
+  <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+  <header class="app-bar">
+    <div>
+      <h1>Northwind · Panel de datos</h1>
+      <div class="sub">ASP.NET Core 10 · EF Core · SQL Server — <span id="health">comprobando…</span></div>
+    </div>
+    <nav>
+      <a href="/swagger" target="_blank" rel="noopener">Swagger UI</a>
+      <a href="/health" target="_blank" rel="noopener">Salud</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="filters">
+      <div>
+        <label for="from">Desde</label>
+        <input type="date" id="from" />
+      </div>
+      <div>
+        <label for="to">Hasta</label>
+        <input type="date" id="to" />
+      </div>
+      <button id="apply">Aplicar rango</button>
+      <a class="btn ghost" href="/api/dashboard/summary" target="_blank" rel="noopener">Ver JSON de resumen</a>
+    </div>
+
+    <div id="summary" class="cards"></div>
+
+    <section class="panel">
+      <h2>Ventas por mes</h2>
+      <div id="chart"><div class="spinner">Cargando…</div></div>
+    </section>
+
+    <div class="grid-2">
+      <section class="panel">
+        <h2>Productos más vendidos</h2>
+        <div id="topProducts"><div class="spinner">Cargando…</div></div>
+      </section>
+      <section class="panel">
+        <h2>Mejores clientes</h2>
+        <div id="topCustomers"><div class="spinner">Cargando…</div></div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h2>Pedidos recientes</h2>
+      <div id="recentOrders"><div class="spinner">Cargando…</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>
+        Explorador de vistas
+        <span class="panel-actions">
+          <select id="viewSelect" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;"></select>
+        </span>
+      </h2>
+      <div id="viewResult"><div class="spinner">Cargando vistas…</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Procedimientos almacenados</h2>
+      <div class="filters" style="box-shadow:none;padding:0 0 12px;">
+        <button id="btnTenExpensive">10 productos más caros</button>
+        <div>
+          <label for="procCustomerId">Cliente (CustomerID)</label>
+          <input type="text" id="procCustomerId" placeholder="ALFKI" maxlength="5" />
+        </div>
+        <button id="btnCustomerOrders">Pedidos del cliente</button>
+      </div>
+      <div id="procResult"><div class="empty">Ejecuta un procedimiento para ver resultados.</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Exportar reportes</h2>
+      <p class="muted">Descarga los reportes en PDF o Excel (XLSX).</p>
+      <div class="filters" style="box-shadow:none;padding:0;flex-wrap:wrap;">
+        <a class="btn" href="/api/reports/sales-by-category.pdf" target="_blank" rel="noopener">Ventas por categoría · PDF</a>
+        <a class="btn ghost" href="/api/reports/sales-by-category.xlsx" target="_blank" rel="noopener">Ventas por categoría · XLSX</a>
+        <a class="btn" href="/api/reports/top-products.pdf" target="_blank" rel="noopener">Top productos · PDF</a>
+        <a class="btn ghost" href="/api/reports/top-products.xlsx" target="_blank" rel="noopener">Top productos · XLSX</a>
+        <a class="btn" href="/api/reports/sales-by-year.pdf" target="_blank" rel="noopener">Ventas por año · PDF</a>
+        <a class="btn ghost" href="/api/reports/invoices.xlsx" target="_blank" rel="noopener">Facturas · XLSX</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    NorthwindApi — datos de demostración Northwind. Ventas calculadas como la suma de importes de línea de "Order Details".
+  </footer>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

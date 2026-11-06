@@ -1,0 +1,302 @@
+# ---------------------------------------------------------------------------
+# Pipeline CI/CD de NorthwindApi (ASP.NET Core 10 / SQL Server 2022).
+#
+#   build -> test -> package (API + SQL Server) -> deploy (manual)
+#
+# Requisitos del runner (Docker executor):
+#   - GitLab Runner con el executor "docker" y modo privilegiado para DinD.
+#   - El registro de contenedores del proyecto habilitado (CI_REGISTRY*).
+#
+# Variables opcionales de CI/CD (Settings -> CI/CD -> Variables):
+#   MSSQL_SA_PASSWORD       Contrasena de "sa" (por defecto Your_password123).
+#                           Sin espacios, ';', '$', comillas ni barras.
+#   DEPLOY_HOST             Host SSH del servidor de despliegue.
+#   DEPLOY_USER             Usuario SSH del servidor de despliegue.
+#   DEPLOY_SSH_PRIVATE_KEY  Clave privada SSH (sin passphrase).
+#   DEPLOY_SSH_KNOWN_HOSTS  Salida de "ssh-keyscan" (opcional; si falta se usa TOFU).
+#   DEPLOY_PATH             Ruta de despliegue (por defecto /opt/northwind-api).
+#   API_PORT / SQL_PORT     Puertos publicados (8080 / 1433).
+#   DEPLOY_URL              URL publica mostrada en el environment "production".
+#   DEPLOY_REGISTRY_USER    Usuario alternativo del registro (por defecto CI_REGISTRY_USER).
+#   DEPLOY_REGISTRY_TOKEN   Token alternativo del registro (por defecto CI_REGISTRY_PASSWORD).
+# ---------------------------------------------------------------------------
+
+stages:
+  - build
+  - test
+  - package
+  - deploy
+
+variables:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+  SOLUTION: "NorthwindApi.slnx"
+  API_PROJECT: "src/NorthwindApi.Api/NorthwindApi.Api.csproj"
+  NUGET_PACKAGES: "$CI_PROJECT_DIR/.nuget/packages"
+
+  # Contrasena de "sa" usada por el servicio de SQL Server, la carga de datos y
+  # las pruebas de integracion. Se puede sobrescribir con una variable de proyecto.
+  MSSQL_SA_PASSWORD: "Your_password123"
+
+# Evita pipelines duplicados (rama + merge request) y limita la ejecucion a
+# ramas principales, tags, merge requests y ejecuciones manuales/programadas.
+workflow:
+  name: "CI/CD $CI_COMMIT_REF_NAME"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+default:
+  interruptible: true
+
+# Porcentaje de cobertura que GitLab extrae del log del job "test".
+coverage: '/Cobertura de lineas: \d+\.\d+%/'
+
+# ---------------------------------------------------------------------------
+# Plantilla para los jobs de .NET
+# ---------------------------------------------------------------------------
+.dotnet:
+  image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+  cache:
+    key:
+      files:
+        - "**/*.csproj"
+        - "NorthwindApi.slnx"
+    paths:
+      - .nuget/packages/
+    policy: pull-push
+
+# ---------------------------------------------------------------------------
+# 1) Compilacion de la solucion en Release y publicacion de la API
+# ---------------------------------------------------------------------------
+build:
+  extends: .dotnet
+  stage: build
+  script:
+    - dotnet --info
+    - dotnet restore "$SOLUTION"
+    - dotnet build "$SOLUTION" --configuration Release --no-restore
+    - >
+      dotnet publish "$API_PROJECT"
+      --configuration Release
+      --no-restore
+      --output artifacts/publish
+      --no-self-contained
+      -p:UseAppHost=false
+  artifacts:
+    name: "api-publish-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - artifacts/publish/
+    expire_in: 1 week
+
+# ---------------------------------------------------------------------------
+# 2) Pruebas unitarias y de integracion contra SQL Server 2022
+# ---------------------------------------------------------------------------
+test:
+  extends: .dotnet
+  stage: test
+  services:
+    # SQL Server 2022 accesible en el host "sqlserver" de la red del job.
+    - name: mcr.microsoft.com/mssql/server:2022-latest
+      alias: sqlserver
+  variables:
+    ACCEPT_EULA: "Y"
+    MSSQL_PID: "Developer"
+    SERVER: "sqlserver"
+  before_script:
+    - dotnet --info
+    # sqlcmd se instala desde el repositorio oficial de Microsoft. El script
+    # scripts/init-northwind.sh lo usa directamente si esta disponible.
+    - apt-get update
+    - apt-get install -y --no-install-recommends curl gnupg2 ca-certificates apt-transport-https
+    - curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+    - |
+      printf 'Types: deb\nURIs: https://packages.microsoft.com/ubuntu/24.04/prod\nSuites: noble\nComponents: main\nSigned-By: /usr/share/keyrings/microsoft-prod.gpg\n' > /etc/apt/sources.list.d/mssql-release.sources
+    - apt-get update
+    - ACCEPT_EULA=Y apt-get install -y --no-install-recommends mssql-tools18 unixodbc-dev
+    - export PATH="$PATH:/opt/mssql-tools18/bin"
+  script:
+    - export NORTHWIND_TEST_CONNECTION="Server=sqlserver,1433;Database=Northwind;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;MultipleActiveResultSets=True"
+    - SERVER=sqlserver SA_PASSWORD="$MSSQL_SA_PASSWORD" bash scripts/init-northwind.sh
+    - dotnet restore "$SOLUTION"
+    - dotnet build "$SOLUTION" --configuration Release --no-restore
+    - >
+      dotnet test "$SOLUTION"
+      --no-build
+      --configuration Release
+      --collect:"XPlat Code Coverage"
+      --logger "trx;LogFileName=results.trx"
+      --results-directory TestResults
+  after_script:
+    - |
+      set +e
+      COVERAGE_FILE="$(find TestResults -name 'coverage.cobertura.xml' 2>/dev/null | head -n 1)"
+      if [ -n "$COVERAGE_FILE" ]; then
+        cp "$COVERAGE_FILE" TestResults/coverage.cobertura.xml
+        RATE="$(grep -o 'line-rate="[0-9.]*"' "$COVERAGE_FILE" | head -n 1 | cut -d'"' -f2)"
+        awk -v rate="$RATE" 'BEGIN { printf "Cobertura de lineas: %.2f%%\n", rate * 100 }'
+      else
+        echo "No se genero el informe de cobertura."
+      fi
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - TestResults/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: TestResults/coverage.cobertura.xml
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+
+# ---------------------------------------------------------------------------
+# 3) Imagenes publicadas en el registro de contenedores de GitLab
+# ---------------------------------------------------------------------------
+.docker:
+  stage: package
+  image: docker:27-cli
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: "tcp://docker:2376"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+package:api:
+  extends: .docker
+  script:
+    - |
+      set -eu
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        TAG="$CI_COMMIT_TAG"
+      else
+        TAG="sha-${CI_COMMIT_SHORT_SHA}"
+      fi
+      echo "Construyendo $CI_REGISTRY_IMAGE:$TAG"
+      docker pull "$CI_REGISTRY_IMAGE:latest" || true
+      docker build --pull --cache-from "$CI_REGISTRY_IMAGE:latest" \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        -t "$CI_REGISTRY_IMAGE:$TAG" -f Dockerfile .
+      docker push "$CI_REGISTRY_IMAGE:$TAG"
+      if [ "${CI_COMMIT_BRANCH:-}" = "$CI_DEFAULT_BRANCH" ]; then
+        docker tag "$CI_REGISTRY_IMAGE:$TAG" "$CI_REGISTRY_IMAGE:latest"
+        docker push "$CI_REGISTRY_IMAGE:latest"
+      fi
+
+package:sqlserver:
+  extends: .docker
+  script:
+    - |
+      set -eu
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        TAG="${CI_COMMIT_TAG}-sqlserver"
+      else
+        TAG="sha-${CI_COMMIT_SHORT_SHA}-sqlserver"
+      fi
+      echo "Construyendo $CI_REGISTRY_IMAGE:$TAG"
+      docker pull "$CI_REGISTRY_IMAGE:sqlserver-latest" || true
+      docker build --pull --cache-from "$CI_REGISTRY_IMAGE:sqlserver-latest" \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        -t "$CI_REGISTRY_IMAGE:$TAG" -f deploy/sqlserver/Dockerfile .
+      docker push "$CI_REGISTRY_IMAGE:$TAG"
+      if [ "${CI_COMMIT_BRANCH:-}" = "$CI_DEFAULT_BRANCH" ]; then
+        docker tag "$CI_REGISTRY_IMAGE:$TAG" "$CI_REGISTRY_IMAGE:sqlserver-latest"
+        docker push "$CI_REGISTRY_IMAGE:sqlserver-latest"
+      fi
+
+# ---------------------------------------------------------------------------
+# 4) Despliegue manual en un servidor con Docker Compose (via SSH)
+# ---------------------------------------------------------------------------
+deploy:
+  stage: deploy
+  image: alpine:3.20
+  interruptible: false
+  needs:
+    - job: package:api
+      artifacts: false
+    - job: package:sqlserver
+      artifacts: false
+  environment:
+    name: production
+  resource_group: production
+  before_script:
+    - apk add --no-cache openssh-client bash curl
+    - ': "${DEPLOY_HOST:?Defina la variable DEPLOY_HOST}"'
+    - ': "${DEPLOY_USER:?Defina la variable DEPLOY_USER}"'
+    - ': "${DEPLOY_SSH_PRIVATE_KEY:?Defina la variable DEPLOY_SSH_PRIVATE_KEY}"'
+    - eval "$(ssh-agent -s)"
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+    - chmod 600 ~/.ssh/id_ed25519
+    - ssh-add ~/.ssh/id_ed25519
+    - |
+      if [ -n "${DEPLOY_SSH_KNOWN_HOSTS:-}" ]; then
+        printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      else
+        ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+      fi
+    - chmod 644 ~/.ssh/known_hosts
+  script:
+    - |
+      set -eu
+      : "${DEPLOY_HOST:?Defina la variable DEPLOY_HOST}"
+      : "${DEPLOY_USER:?Defina la variable DEPLOY_USER}"
+      : "${DEPLOY_SSH_PRIVATE_KEY:?Defina la variable DEPLOY_SSH_PRIVATE_KEY}"
+      : "${MSSQL_SA_PASSWORD:?Defina la variable MSSQL_SA_PASSWORD}"
+
+      DEPLOY_PATH="${DEPLOY_PATH:-/opt/northwind-api}"
+      API_PORT="${API_PORT:-8080}"
+      SQL_PORT="${SQL_PORT:-1433}"
+      REGISTRY_USER="${DEPLOY_REGISTRY_USER:-$CI_REGISTRY_USER}"
+      REGISTRY_TOKEN="${DEPLOY_REGISTRY_TOKEN:-$CI_REGISTRY_PASSWORD}"
+      REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        TAG="$CI_COMMIT_TAG"
+      else
+        TAG="sha-${CI_COMMIT_SHORT_SHA}"
+      fi
+      API_IMAGE="$CI_REGISTRY_IMAGE:$TAG"
+      SQLSERVER_IMAGE="$CI_REGISTRY_IMAGE:$TAG-sqlserver"
+
+      echo "Desplegando $API_IMAGE en $REMOTE:$DEPLOY_PATH"
+      scp deploy/docker-compose.prod.yml deploy/deploy.sh instnwnd.sql "$REMOTE:/tmp/"
+
+      ssh "$REMOTE" "cat > /tmp/northwind-deploy.env" <<EOF
+      DEPLOY_PATH=$DEPLOY_PATH
+      API_IMAGE=$API_IMAGE
+      SQLSERVER_IMAGE=$SQLSERVER_IMAGE
+      API_PORT=$API_PORT
+      SQL_PORT=$SQL_PORT
+      MSSQL_SA_PASSWORD=$MSSQL_SA_PASSWORD
+      REGISTRY=$CI_REGISTRY
+      REGISTRY_USER=$REGISTRY_USER
+      REGISTRY_TOKEN=$REGISTRY_TOKEN
+      EOF
+
+      ssh "$REMOTE" "chmod 600 /tmp/northwind-deploy.env"
+      ssh "$REMOTE" 'trap "rm -f /tmp/northwind-deploy.env" EXIT; bash /tmp/deploy.sh /tmp/northwind-deploy.env /tmp/docker-compose.prod.yml /tmp/instnwnd.sql'
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: manual
+      allow_failure: true
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+      allow_failure: true

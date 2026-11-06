@@ -1,0 +1,85 @@
+name: northwind
+
+services:
+  # ---------- SQL Server 2022 (Linux) ----------
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: northwind-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Your_password123}"
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -Q "SELECT 1" -b -o /dev/null
+          || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -Q "SELECT 1" -b -o /dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - northwind
+
+  # ---------- Inicialización de la base de datos ----------
+  # Crea la base "Northwind" y carga instnwnd.sql. Se ejecuta una sola vez.
+  db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: northwind-db-init
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Your_password123}"
+    volumes:
+      - ./instnwnd.sql:/scripts/instnwnd.sql:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        TOOLS=/opt/mssql-tools18/bin/sqlcmd
+        [ -x "$$TOOLS" ] || TOOLS=/opt/mssql-tools/bin/sqlcmd
+        echo "Creando la base de datos Northwind (si no existe)..."
+        "$$TOOLS" -C -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" \
+          -Q "IF DB_ID('Northwind') IS NULL CREATE DATABASE Northwind;"
+        echo "Cargando instnwnd.sql..."
+        "$$TOOLS" -C -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" \
+          -d Northwind -i /scripts/instnwnd.sql -f 65001
+        echo "Base de datos Northwind lista."
+    restart: "no"
+    networks:
+      - northwind
+
+  # ---------- API (ASP.NET Core 10 / Kestrel) ----------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: northwind-api
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      # Development expone Swagger UI en /swagger y el panel en /. Cámbielo a Production si no los desea.
+      ASPNETCORE_ENVIRONMENT: "Development"
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__Northwind: "Server=sqlserver,1433;Database=Northwind;User Id=sa;Password=${MSSQL_SA_PASSWORD:-Your_password123};TrustServerCertificate=True;MultipleActiveResultSets=True"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    networks:
+      - northwind
+
+volumes:
+  mssql-data:
+
+networks:
+  northwind:
+    driver: bridge

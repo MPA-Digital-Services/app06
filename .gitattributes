@@ -1,0 +1,8 @@
+# Normaliza finales de línea en el repositorio.
+* text=auto
+
+# Los scripts de shell deben usar LF (se ejecutan en Linux/CI y en contenedores).
+*.sh text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+*.yml text eol=lf

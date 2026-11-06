@@ -1,0 +1,98 @@
+# Orquestación de PRODUCCIÓN para la API NorthwindApi.
+#
+# A diferencia de "docker-compose.yml" (desarrollo: construye la imagen localmente),
+# este archivo CONSUME las imágenes ya publicadas en el registro de contenedores
+# de GitLab por el pipeline de CI/CD.
+#
+# Variables de entorno requeridas (las exporta "deploy/deploy.sh"):
+#   MSSQL_SA_PASSWORD   Contraseña del usuario "sa" de SQL Server
+#   API_IMAGE           Imagen a desplegar ($CI_REGISTRY_IMAGE:<tag>)
+#   API_PORT            Puerto HTTP publicado por la API (por defecto 8080)
+#   SQL_PORT            Puerto publicado por SQL Server   (por defecto 1433)
+#   SQLSERVER_IMAGE     Imagen de SQL Server (opcional; por defecto la oficial)
+
+name: northwind
+
+services:
+  # ---------- SQL Server 2022 (Linux) ----------
+  sqlserver:
+    image: "${SQLSERVER_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}"
+    container_name: northwind-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?defina MSSQL_SA_PASSWORD}"
+    ports:
+      - "${SQL_PORT:-1433}:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -Q "SELECT 1" -b -o /dev/null
+          || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -Q "SELECT 1" -b -o /dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - northwind
+
+  # ---------- Inicialización de la base de datos (perfil "init") ----------
+  # No se levanta con "docker compose up": sólo se ejecuta la primera vez,
+  # desde "deploy/deploy.sh", con: docker compose --profile init run --rm db-init
+  db-init:
+    image: "${SQLSERVER_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}"
+    container_name: northwind-db-init
+    profiles:
+      - init
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?defina MSSQL_SA_PASSWORD}"
+    volumes:
+      - ./instnwnd.sql:/scripts/instnwnd.sql:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        TOOLS=/opt/mssql-tools18/bin/sqlcmd
+        [ -x "$$TOOLS" ] || TOOLS=/opt/mssql-tools/bin/sqlcmd
+        echo "Creando la base de datos Northwind (si no existe)..."
+        "$$TOOLS" -C -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" \
+          -Q "IF DB_ID('Northwind') IS NULL CREATE DATABASE Northwind;"
+        echo "Cargando instnwnd.sql..."
+        "$$TOOLS" -C -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" \
+          -d Northwind -i /scripts/instnwnd.sql -f 65001
+        echo "Base de datos Northwind lista."
+    restart: "no"
+    networks:
+      - northwind
+
+  # ---------- API (ASP.NET Core 10 / Kestrel) ----------
+  api:
+    image: "${API_IMAGE:?defina API_IMAGE}"
+    pull_policy: always
+    container_name: northwind-api
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Production"
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__Northwind: "Server=sqlserver,1433;Database=Northwind;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;MultipleActiveResultSets=True"
+    ports:
+      - "${API_PORT:-8080}:8080"
+    restart: unless-stopped
+    networks:
+      - northwind
+
+volumes:
+  mssql-data:
+
+networks:
+  northwind:
+    driver: bridge
